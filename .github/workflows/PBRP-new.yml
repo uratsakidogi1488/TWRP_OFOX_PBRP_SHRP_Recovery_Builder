@@ -67,12 +67,37 @@ jobs:
       with:
         swap-size-gb: 24
 
+    - name: Prepare device tree
+      run: |
+        set -euo pipefail
+        echo "Preparing device tree from: '${{ inputs.DEVICE_TREE }}'"
+        if [ "${{ inputs.DEVICE_TREE }}" = "https://github.com/enter_username/repo_name" ] || [ -z "${{ inputs.DEVICE_TREE }}" ]; then
+          echo "ERROR: DEVICE_TREE not set or using placeholder. Set DEVICE_TREE to a valid GitHub repo URL." >&2
+          exit 1
+        fi
+        DEVICE_URL="${{ inputs.DEVICE_TREE }}"
+        # Extract owner/repo from URL (supports URLs like https://github.com/owner/repo and https://github.com/owner/repo.git)
+        OWNER_REPO=$(echo "$DEVICE_URL" | sed -E 's#https://github.com/([^/]+/[^/]+)(\.git)?#\1#')
+        if git ls-remote "$DEVICE_URL" HEAD >/dev/null 2>&1; then
+          echo "Public repo accessible, cloning $DEVICE_URL"
+          git clone --depth=1 "$DEVICE_URL" tmp_device_tree
+        else
+          if [ -n "${{ secrets.PERSONAL_ACCESS_TOKEN }}" ]; then
+            echo "Public access failed — trying with PERSONAL_ACCESS_TOKEN"
+            git clone --depth=1 "https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${OWNER_REPO}.git" tmp_device_tree
+          else
+            echo "ERROR: Cannot access $DEVICE_URL and no PERSONAL_ACCESS_TOKEN secret provided" >&2
+            exit 1
+          fi
+        fi
+        echo "DEVICE_TREE_PATH=./tmp_device_tree" >> $GITHUB_ENV
+
     - name: Build PitchBlack Recovery
       uses: mlm-games/pitchblack-pbrp-builder-action@main
       id: build
       with:
         MANIFEST_BRANCH: ${{ inputs.MANIFEST_BRANCH }}
-        DEVICE_TREE:  ${{ inputs.DEVICE_TREE }}
+        DEVICE_TREE:  ${{ env.DEVICE_TREE_PATH }}
         DEVICE_TREE_BRANCH:  ${{ inputs.DEVICE_TREE_BRANCH }}
         BUILD_TARGET:  ${{ inputs.BUILD_TARGET }}
   

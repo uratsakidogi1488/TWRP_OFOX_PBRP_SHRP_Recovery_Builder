@@ -71,26 +71,56 @@ jobs:
       run: |
         set -euo pipefail
         echo "Preparing device tree from: '${{ inputs.DEVICE_TREE }}'"
-        if [ "${{ inputs.DEVICE_TREE }}" = "https://github.com/enter_username/repo_name" ] || [ -z "${{ inputs.DEVICE_TREE }}" ]; then
-          echo "ERROR: DEVICE_TREE not set or using placeholder. Set DEVICE_TREE to a valid GitHub repo URL." >&2
-          exit 1
-        fi
-        DEVICE_URL="${{ inputs.DEVICE_TREE }}"
-        # Extract owner/repo from URL (supports URLs like https://github.com/owner/repo and https://github.com/owner/repo.git)
-        OWNER_REPO=$(echo "$DEVICE_URL" | sed -E 's#https://github.com/([^/]+/[^/]+)(\.git)?#\1#')
-        if git ls-remote "$DEVICE_URL" HEAD >/dev/null 2>&1; then
-          echo "Public repo accessible, cloning $DEVICE_URL"
-          git clone --depth=1 "$DEVICE_URL" tmp_device_tree
-        else
-          if [ -n "${{ secrets.PERSONAL_ACCESS_TOKEN }}" ]; then
-            echo "Public access failed — trying with PERSONAL_ACCESS_TOKEN"
-            git clone --depth=1 "https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${OWNER_REPO}.git" tmp_device_tree
+
+        INPUT="${{ inputs.DEVICE_TREE }}"
+
+        # If input is empty or placeholder, try to auto-detect a device tree inside the checked-out repository
+        if [ -z "$INPUT" ] || [ "$INPUT" = "https://github.com/enter_username/repo_name" ]; then
+          echo "DEVICE_TREE input empty or placeholder — attempting to auto-detect device tree in repository..."
+
+          # look for common Android device tree files under device/*/*
+          DETECTED=$(find . -type f \( -name Android.mk -o -name Android.bp -o -name BoardConfig.mk -o -iname "device.mk" \) -path "./device/*/*" -printf '%h\n' | sort -u | head -n1 || true)
+
+          if [ -n "$DETECTED" ]; then
+            echo "Found device tree at $DETECTED"
+            # export relative path to workspace
+            echo "DEVICE_TREE_PATH=$GITHUB_WORKSPACE/$DETECTED" >> $GITHUB_ENV
           else
-            echo "ERROR: Cannot access $DEVICE_URL and no PERSONAL_ACCESS_TOKEN secret provided" >&2
+            echo "No local device tree detected. Please provide DEVICE_TREE input or add a device tree to the repo."
+            echo "ERROR: DEVICE_TREE not set or using placeholder. Set DEVICE_TREE to a valid GitHub repo URL or owner/repo." >&2
             exit 1
           fi
+
+        else
+
+          # normalize input: accept either full URL or owner/repo
+          if echo "$INPUT" | grep -E '^([^/]+/[^/]+)$' >/dev/null 2>&1; then
+            OWNER_REPO="$INPUT"
+            DEVICE_URL="https://github.com/$OWNER_REPO.git"
+          else
+            # strip possible .git and trailing slash, then ensure .git suffix for cloning
+            DEVICE_URL=$(echo "$INPUT" | sed -E 's#(https://github.com/[^/]+/[^/]+)(\.git)?/*#\1.git#')
+            OWNER_REPO=$(echo "$DEVICE_URL" | sed -E 's#https://github.com/([^/]+/[^/]+)\.git#\1#')
+          fi
+
+          echo "Checking access to $DEVICE_URL"
+
+          # try public access first
+          if git ls-remote "$DEVICE_URL" HEAD >/dev/null 2>&1; then
+            echo "Public repo accessible, cloning $DEVICE_URL"
+            git clone --depth=1 "$DEVICE_URL" tmp_device_tree
+          else
+            if [ -n "${{ secrets.PERSONAL_ACCESS_TOKEN }}" ]; then
+              echo "Public access failed — trying with PERSONAL_ACCESS_TOKEN"
+              git clone --depth=1 "https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${OWNER_REPO}.git" tmp_device_tree
+            else
+              echo "ERROR: Cannot access $DEVICE_URL and no PERSONAL_ACCESS_TOKEN secret provided" >&2
+              exit 1
+            fi
+          fi
+
+          echo "DEVICE_TREE_PATH=./tmp_device_tree" >> $GITHUB_ENV
         fi
-        echo "DEVICE_TREE_PATH=./tmp_device_tree" >> $GITHUB_ENV
 
     - name: Build PitchBlack Recovery
       uses: mlm-games/pitchblack-pbrp-builder-action@main

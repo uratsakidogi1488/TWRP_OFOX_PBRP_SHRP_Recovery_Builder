@@ -75,7 +75,7 @@ jobs:
         INPUT="${{ inputs.DEVICE_TREE }}"
 
         # If input is empty or placeholder, try to auto-detect a device tree inside the checked-out repository
-        if [ -z "$INPUT" ] || [ "$INPUT" = "https://github.com/enter_username/repo_name" ]; then
+        if [ -z "$INPUT" ] || [ "$INPUT" = "https://github.com/uratsakidogi1488/WP15_TWRP" ]; then
           echo "DEVICE_TREE input empty or placeholder — attempting to auto-detect device tree in repository..."
 
           # look for common Android device tree files under device/*/*
